@@ -1,7 +1,7 @@
+using Microsoft.EntityFrameworkCore;
 using MoviesTelegramBot.Data;
 using MoviesTelegramBot.Interfaces;
 using MoviesTelegramBot.Models;
-using Telegram.Bot.Types;
 
 namespace MoviesTelegramBot.Services;
 
@@ -16,12 +16,21 @@ public class UserService: IUser
 
     public async Task AddMovie(long userId, string movie)
     {
-        var newUser = new Users
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == userId);
+        if (user == null)
         {
-            UserId = userId,
-            Movie = movie
-        };
-        _context.Users.Add(newUser);
+            user = new Users
+            {
+                UserId = userId,
+                Movie = movie
+            };
+            _context.Users.Add(user);
+        }
+        else
+        {
+            user.UserId = userId;
+            user.Movie = movie; 
+        }
         await _context.SaveChangesAsync();
     }
 
@@ -32,9 +41,9 @@ public class UserService: IUser
         await _context.SaveChangesAsync();
     }
 
-    public List<Users> GetAllMoviesFromUser(long userId)
+    public async Task<List<string>> GetAllMoviesFromUser(long userId)
     {
-        return  _context.Users.Where(u => u.UserId == userId).ToList();
+        return await _context.Users.Where(u => u.UserId == userId).Select(u => u.Movie).ToListAsync();
     }
     
 }

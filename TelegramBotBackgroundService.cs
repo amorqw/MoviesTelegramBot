@@ -1,134 +1,143 @@
-using System.Text.Json;
-using Microsoft.VisualBasic;
+
+using System.Reflection.Metadata;
 using MoviesTelegramBot.Features;
-using MoviesTelegramBot.Interfaces;
-using MoviesTelegramBot.Services;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
+using Telegram.Bot.Types.Enums;
+using MoviesTelegramBot.Interfaces;
 
-namespace MoviesTelegramBot;
-
-public class TelegramBotBackgroundService : BackgroundService
+namespace MoviesTelegramBot
 {
-    private readonly ITelegramBotClient _botClient;
-    private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ILogger<TelegramBotBackgroundService> _logger;
-    private readonly IUser _userService;
-
-    public TelegramBotBackgroundService(
-        ITelegramBotClient botClient,
-        IServiceScopeFactory scopeFactory,
-        ILogger<TelegramBotBackgroundService> logger,
-        IUser userService)
+    public class TelegramBotBackgroundService : IHostedService
     {
-        _botClient = botClient;
-        _scopeFactory = scopeFactory;
-        _logger = logger;
-        _userService = userService;
-    }
+        private readonly ITelegramBotClient _botClient;
+        private readonly IServiceScopeFactory _scopeFactory;
+        private readonly ILogger<TelegramBotBackgroundService> _logger;
+        private CancellationTokenSource _cts;
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        ReceiverOptions receiverOptions = new()
+        public TelegramBotBackgroundService(
+            ITelegramBotClient botClient,
+            IServiceScopeFactory scopeFactory,
+            ILogger<TelegramBotBackgroundService> logger)
         {
-            AllowedUpdates = new[] { Telegram.Bot.Types.Enums.UpdateType.Message, Telegram.Bot.Types.Enums.UpdateType.CallbackQuery }
-        };
+            _botClient = botClient;
+            _scopeFactory = scopeFactory;
+            _logger = logger;
+        }
 
-        while (!stoppingToken.IsCancellationRequested)
+        public Task StartAsync(CancellationToken cancellationToken)
         {
-            await _botClient.ReceiveAsync(
+            _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+            ReceiverOptions receiverOptions = new()
+            {
+                AllowedUpdates = new[] { UpdateType.Message, UpdateType.CallbackQuery }
+            };
+
+            _botClient.StartReceiving(
                 updateHandler: HandleUpdateAsync,
                 errorHandler: HandleErrorAsync,
                 receiverOptions: receiverOptions,
-                cancellationToken: stoppingToken);
+                cancellationToken: _cts.Token);
+
+            _logger.LogInformation("Telegram bot started receiving updates.");
+            return Task.CompletedTask;
         }
-    }
 
-    private async Task HandleUpdateAsync(
-        ITelegramBotClient botClient,
-        Update update,
-        CancellationToken cancellationToken)
-    {
-        _logger.LogInformation($"Received update: {JsonSerializer.Serialize(update)}");
-        var scope = _scopeFactory.CreateScope();
-
-        var messageHandler = scope.ServiceProvider.GetRequiredService<IHandler<Message>>();
-
-        var handler = update switch
+        public Task StopAsync(CancellationToken cancellationToken)
         {
-            { Message: { } message } => messageHandler.Handle(message, cancellationToken),
-            { CallbackQuery: { } query } => CallbackQueryHandler(query, cancellationToken),
-            _ => UnknownUpdateHandlerAsync(update, cancellationToken)
-        };
-
-        await handler;
-    }
-
-    private Task UnknownUpdateHandlerAsync(Update update, CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("Unknown type message");
-        return Task.CompletedTask;
-    }
-
-    private async Task CallbackQueryHandler(CallbackQuery query, CancellationToken cancellationToken)
-    {
-        if (query.Message is not { } message)
-            return;
-
-        switch (query.Data)
-        {
-            case "lessons-info":
-                await _botClient.SendMessage(
-                    chatId: message.Chat.Id,
-                    text: "Вот тебе информация о занятиях, дорогой друг",
-                    cancellationToken: cancellationToken);
-                return;
-            case "my-movies":
-                await _botClient.SendMessage(
-                    message.Chat.Id,
-                    "Твой список фильмов"
-                    //to do подкючить бд и выводить из бд список фильмов 
-                    
-                );
-                return;
-            case "add-movie":
-                await _botClient.SendMessage(
-                    chatId: message.Chat.Id,
-                    text:"Напиши название фильма"
-                );
-                await _userService.AddMovie(message.From.Id, message.Text);
-                return;
-            
-            case "delete-movie":
-                await _botClient.SendTextMessageAsync(
-                    message.Chat.Id,
-                    "Выбери фильм который хочешь удалить"
-                    // TO do выводить список фильмов как кнопки -> при нажатии выбор либо удалить либо изменить название
-                );
-                return;
+            _cts?.Cancel();
+            _logger.LogInformation("Telegram bot is stopping...");
+            return Task.CompletedTask;
         }
-    }
 
-    private Task HandleErrorAsync(
-        ITelegramBotClient botClient,
-        Exception exception,
-        CancellationToken cancellationToken)
+
+private readonly Dictionary<long, string> _userStates = new(); // Словарь для отслеживания состояния пользователя (например, "добавляет фильм")
+
+private async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
+{
+    using var scope = _scopeFactory.CreateScope();
+    var messageHandler = scope.ServiceProvider.GetRequiredService<IHandler<Message>>();
+    var userService = scope.ServiceProvider.GetRequiredService<IUser>();
+
+    try
     {
-        switch (exception)
+        switch (update)
         {
-            case ApiRequestException apiRequestException:
-                _logger.LogError(
-                    apiRequestException,
-                    "Telegram API Error:\n[{errorCode}]\n{message}",
-                    apiRequestException.ErrorCode,
-                    apiRequestException.Message);
-                return Task.CompletedTask;
+            case { Message: { } message }:
+                // Проверяем, находится ли пользователь в состоянии "добавления фильма"
+                if (_userStates.TryGetValue(message.Chat.Id, out var state) && state == "adding_movie")
+                {
+                    await userService.AddMovie(message.From.Id, message.Text); // Добавляем фильм в базу данных
+                    await botClient.SendTextMessageAsync(message.Chat.Id, $"Фильм \"{message.Text}\" добавлен!", cancellationToken: cancellationToken); // Подтверждаем добавление фильма пользователю
+                    _userStates.Remove(message.Chat.Id); // Удаляем состояние пользователя после завершения действия
+                }
+                else
+                {
+                    await messageHandler.Handle(message,cancellationToken);
+                }
+                break;
+
+            case { CallbackQuery: { } query }:
+                await HandleCallbackQueryAsync(query, userService, cancellationToken); // Обрабатываем нажатие кнопок
+                break;
 
             default:
-                _logger.LogError(exception, "Error while processing message in telegram bot");
-                return Task.CompletedTask;
+                _logger.LogWarning("Unhandled update type: {Type}", update.Type); // Логируем необработанные типы обновлений
+                break;
+        }
+    }
+    catch (Exception ex)
+    {
+        _logger.LogError(ex, "Error handling update."); // Логируем ошибки
+    }
+}
+
+private async Task HandleCallbackQueryAsync(CallbackQuery query, IUser userService, CancellationToken cancellationToken)
+{
+    if (query.Message is not { } message)
+    {
+        _logger.LogWarning("Callback query message is null."); // Предупреждаем, если сообщение из запроса пустое
+        return;
+    }
+
+    switch (query.Data)
+    {
+        case "add-movie":
+            _userStates[message.Chat.Id] = "adding_movie"; // Устанавливаем состояние "добавления фильма" для текущего пользователя
+            await _botClient.SendTextMessageAsync(
+                message.Chat.Id,
+                "Напиши название фильма", // Информируем пользователя о следующем шаге
+                cancellationToken: cancellationToken);
+            break;
+
+        default:
+            // Если команда не распознана, отправляем стандартное сообщение
+            await _botClient.SendTextMessageAsync(
+                message.Chat.Id,
+                "Я не знаю такой команды. Попробуй выбрать что-то из меню.",
+                cancellationToken: cancellationToken);
+            break;
+    }
+}
+
+
+
+        private Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
+        {
+            if (exception is ApiRequestException apiException)
+            {
+                _logger.LogError(apiException, "Telegram API error. Code: {ErrorCode}. Message: {Message}",
+                    apiException.ErrorCode, apiException.Message);
+            }
+            else
+            {
+                _logger.LogError(exception, "Unexpected error occurred.");
+            }
+
+            return Task.CompletedTask;
         }
     }
 }

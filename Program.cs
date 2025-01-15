@@ -12,7 +12,7 @@ using Telegram.Bot.Types;
 var builder = Host.CreateApplicationBuilder(args);
 builder.Services.AddScoped<IUser,UserService>();
 
-builder.Services.AddTransient<TelegramBotBackgroundService>();
+builder.Services.AddHostedService<TelegramBotBackgroundService>();
 
 builder.Services.AddTransient<ITelegramBotClient, TelegramBotClient>(serviceProvider =>
 {
