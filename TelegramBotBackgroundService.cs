@@ -54,7 +54,7 @@ namespace MoviesTelegramBot
         }
 
 
-private readonly Dictionary<long, string> _userStates = new(); // Словарь для отслеживания состояния пользователя (например, "добавляет фильм")
+private readonly Dictionary<long, string> _userStates = new(); 
 
 private async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
 {
@@ -67,12 +67,11 @@ private async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update
         switch (update)
         {
             case { Message: { } message }:
-                // Проверяем, находится ли пользователь в состоянии "добавления фильма"
                 if (_userStates.TryGetValue(message.Chat.Id, out var state) && state == "adding_movie")
                 {
-                    await userService.AddMovie(message.From.Id, message.Text); // Добавляем фильм в базу данных
+                    await userService.AddMovie(message.From.Id, message.Text); 
                     await botClient.SendTextMessageAsync(message.Chat.Id, $"Фильм \"{message.Text}\" добавлен!", cancellationToken: cancellationToken); // Подтверждаем добавление фильма пользователю
-                    _userStates.Remove(message.Chat.Id); // Удаляем состояние пользователя после завершения действия
+                    _userStates.Remove(message.Chat.Id); 
                 }
                 else
                 {
@@ -81,17 +80,17 @@ private async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update
                 break;
 
             case { CallbackQuery: { } query }:
-                await HandleCallbackQueryAsync(query, userService, cancellationToken); // Обрабатываем нажатие кнопок
+                await HandleCallbackQueryAsync(query, userService, cancellationToken); 
                 break;
 
             default:
-                _logger.LogWarning("Unhandled update type: {Type}", update.Type); // Логируем необработанные типы обновлений
+                _logger.LogWarning("Unhandled update type: {Type}", update.Type); 
                 break;
         }
     }
     catch (Exception ex)
     {
-        _logger.LogError(ex, "Error handling update."); // Логируем ошибки
+        _logger.LogError(ex, "Error handling update."); 
     }
 }
 
@@ -99,22 +98,21 @@ private async Task HandleCallbackQueryAsync(CallbackQuery query, IUser userServi
 {
     if (query.Message is not { } message)
     {
-        _logger.LogWarning("Callback query message is null."); // Предупреждаем, если сообщение из запроса пустое
+        _logger.LogWarning("Callback query message is null."); 
         return;
     }
 
     switch (query.Data)
     {
         case "add-movie":
-            _userStates[message.Chat.Id] = "adding_movie"; // Устанавливаем состояние "добавления фильма" для текущего пользователя
+            _userStates[message.Chat.Id] = "adding_movie"; 
             await _botClient.SendTextMessageAsync(
                 message.Chat.Id,
-                "Напиши название фильма", // Информируем пользователя о следующем шаге
+                "Напиши название фильма", 
                 cancellationToken: cancellationToken);
             break;
 
         default:
-            // Если команда не распознана, отправляем стандартное сообщение
             await _botClient.SendTextMessageAsync(
                 message.Chat.Id,
                 "Я не знаю такой команды. Попробуй выбрать что-то из меню.",

@@ -4,9 +4,9 @@ using MoviesTelegramBot.Models;
 
 namespace MoviesTelegramBot.Configurations;
 
-public class UserConfiguration: IEntityTypeConfiguration<Users>
+public class UserConfiguration: IEntityTypeConfiguration<User>
 {
-    public void Configure(EntityTypeBuilder<Users> builder)
+    public void Configure(EntityTypeBuilder<User> builder)
     {
         builder.HasKey(u=>u.UserId);
     }

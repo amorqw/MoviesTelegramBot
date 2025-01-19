@@ -1,49 +1,67 @@
 using Microsoft.EntityFrameworkCore;
-using MoviesTelegramBot.Data;
+using MoviesTelegramBot.Data; 
 using MoviesTelegramBot.Interfaces;
-using MoviesTelegramBot.Models;
+using MoviesTelegramBot.Models; 
+using Telegram.Bot.Types;
+using User = MoviesTelegramBot.Models.User;
 
-namespace MoviesTelegramBot.Services;
-
-public class UserService: IUser
+namespace MoviesTelegramBot.Services
 {
-    private readonly AppDbContext _context;
-
-    public UserService(AppDbContext context)
+    public class UserService : IUser
     {
-        _context = context;
-    }
+        private readonly AppDbContext _context;
 
-    public async Task AddMovie(long userId, string movie)
-    {
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == userId);
-        if (user == null)
+        public UserService(AppDbContext context)
         {
-            user = new Users
+            _context = context;
+        }
+
+        public async Task AddMovie(long userId, string movieName)
+        {
+            var user = await _context.Users.FindAsync(userId);
+            if (user == null)
             {
-                UserId = userId,
-                Movie = movie
-            };
-            _context.Users.Add(user);
+                user = new User { UserId = userId };
+                _context.Users.Add(user);
+            }
+
+            var movie = await _context.Movies.FirstOrDefaultAsync(m => m.MovieName == movieName);
+            if (movie == null)
+            {
+                movie = new Movie { MovieName = movieName };
+                _context.Movies.Add(movie);
+                await _context.SaveChangesAsync(); 
+            }
+
+            
+            if (!await _context.UserMovies.AnyAsync(um => um.UserId == userId && um.MovieId == movie.MovieId))
+            {
+                var userMovie = new UserMovie { UserId = userId, MovieId = movie.MovieId };
+                _context.UserMovies.Add(userMovie);
+                await _context.SaveChangesAsync(); 
+            }
+
         }
-        else
+
+        public async Task RemoveMovie(long userId, long movieId) 
         {
-            user.UserId = userId;
-            user.Movie = movie; 
+            var userMovie = await _context.UserMovies
+                .FirstOrDefaultAsync(um => um.UserId == userId && um.MovieId == movieId);
+            if (userMovie != null)
+            {
+                _context.UserMovies.Remove(userMovie);
+                await _context.SaveChangesAsync();
+            }
         }
-        await _context.SaveChangesAsync();
-    }
 
-    public async Task RemoveMovie(long userId, long movie)
-    {
-        var user = await _context.Users.FindAsync(userId, movie);
-        _context.Users.Remove(user);
-        await _context.SaveChangesAsync();
-    }
+        public async Task<List<string>> GetAllMoviesFromUser(long userId)
+        {
+            var userMovies = await _context.UserMovies
+                .Where(um => um.UserId == userId)
+                .Select(um => um.Movie.MovieName) 
+                .ToListAsync();
 
-    public async Task<List<string>> GetAllMoviesFromUser(long userId)
-    {
-        return await _context.Users.Where(u => u.UserId == userId).Select(u => u.Movie).ToListAsync();
+            return userMovies;
+        }
     }
-    
 }
