@@ -24,7 +24,7 @@ public class MessageHandler : IHandler<Message>
 
         await _botClient.SendTextMessageAsync(
             chatId: message.Chat.Id,
-            text: "Здесь вы можете посмотреть фильмы, добавленные в список желаемого, или добавить новые ",
+            text: "Здесь вы можете посмотреть фильмы, добавленные в список желаемого, или добавить новые :)",
             replyMarkup: inlineKeyboard,
             cancellationToken: cancellationToken);
     }

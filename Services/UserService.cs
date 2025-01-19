@@ -43,14 +43,25 @@ namespace MoviesTelegramBot.Services
 
         }
 
-        public async Task RemoveMovie(long userId, long movieId) 
+        public async Task RemoveMovie(long userId, int movieId)
         {
             var userMovie = await _context.UserMovies
                 .FirstOrDefaultAsync(um => um.UserId == userId && um.MovieId == movieId);
+
             if (userMovie != null)
             {
                 _context.UserMovies.Remove(userMovie);
                 await _context.SaveChangesAsync();
+
+                if (!await _context.UserMovies.AnyAsync(um => um.MovieId == movieId))
+                {
+                    var movieToRemove = await _context.Movies.FindAsync(movieId);
+                    if (movieToRemove != null)
+                    {
+                        _context.Movies.Remove(movieToRemove);
+                        await _context.SaveChangesAsync();
+                    }
+                }
             }
         }
 
